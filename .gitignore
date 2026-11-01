@@ -1,13 +1,15 @@
-# Credential store: never commit, never include in an artifact.
+# Secrets and persistent local state must stay outside the repository.
 credentials.key
 credentials.enc
+session.enc
+store.lock
 *.key
 *.enc
-# Temp password seeding files: never commit.
 condo-pass*
 *.tmp-pass
-# Local state and built binaries.
-/condo
-/cmd/condo/condo
+.env
+.env.*
 *.jsonl
 !testdata/*.jsonl
+/target/
+/condo

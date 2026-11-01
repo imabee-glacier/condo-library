@@ -1,285 +1,249 @@
-# condo-library-go
+# condo-library
 
-A proper Go SDK for the Superlógica Área do Condômino resident portal
-(Dinâmica Condomínios SC), version 0.1.0.
+Rust SDK and JSON CLI for the Superlógica Área do Condômino resident
+portal. Designed for AI agents running in a Linux/Unix sandbox, including
+Meta Muse: direct HTTP only, typed results, strict tool inputs, encrypted
+credentials and persistent sessions. No browser, browser driver, browser
+extension, or browser fallback is used anywhere in the SDK.
 
-It is a direct-HTTP SDK, not a browser-automation wrapper. At runtime it
-makes ordinary HTTP requests to the portal's JSON API
-(`https://<host>/areadocondomino/atual/<controller>/index`, traced live
-2026-11-01) and returns JSON-serialisable results. There is no browser,
-no headless browser, and no WebDriver in the runtime path. A browser was
-used only once, to map the portal; it is never used by this library.
-The client HTML pages are shells; their data is loaded by JavaScript
-from that API, so HTML table parsing is not the read path.
+This is a fresh implementation. The previous Go sources are no longer in
+the repository. See [AUDIT.md](AUDIT.md) for findings and verification limits.
 
-## What it does
+## Build and check
 
-- **Data-first, JSON-first.** Every read returns structured JSON. PDFs
-  are only fetched when the caller explicitly asks for the official
-  document (`FetchDocumentPDF` / `fetch-document-pdf`).
-- **JSONL tracking, like the audit repo.** Records are encoded one JSON
-  object per line, money is a decimal string (never binary floating
-  point), and a missing field means "not reported", not zero.
-- **Autonomous routine checks, silent unless new.** See
-  `check-new-bills` below.
-- **AI-safe actions.** Every consequential action is preview-first and
-  gated. See Safety tiers.
+Use current stable Rust on Linux or another Unix platform. Dependencies
+are pinned by Cargo.lock. Run:
 
-## Authentication — read this first
-
-**Secure Vault limitation, stated plainly:** Muse's Secure Vault does
-NOT hand a stored password back to an SDK, to Muse, or to any tool. It
-only fills the password in the browser login flow. This SDK therefore
-cannot read a password out of the Secure Vault, and no code here tries
-to. Do not design around that false assumption, and do not claim
-Vault-to-SDK direct use works.
-
-For autonomous, browser-free operation the SDK uses its own encrypted
-credential store, enrolled once in a separate one-time user step:
-
-```
-condo setup-auth --store-dir ~/.condo-store --username <your-email>
-# Password is read from stdin without echo, encrypted immediately,
-# and never stored in plain text.
+```sh
+cargo fmt --all --check
+cargo clippy --all-targets --locked -- -D warnings
+cargo test --all-targets --locked
+cargo test --doc --locked
+cargo build --release --locked
+cargo audit --deny warnings
 ```
 
-### Seeding from a temporary file (user-approved alternative)
+`cargo audit` requires `cargo install cargo-audit --locked`. CI runs these
+same checks. Tests use local HTTP servers and fake credentials; they never
+contact a live account. The executable is `target/release/condo`.
 
-```
-# Create the temp file OUTSIDE any git repository, with 0600, e.g.:
-umask 077
-mktemp /tmp/condo-pass.XXXXXX   # then edit that file to contain only the password
-chmod 600 /tmp/condo-pass.XXXXXX
+## Credentials and unattended operation
 
-condo setup-auth --store-dir ~/.condo-store --username <your-email> \
-  --from-file /tmp/condo-pass.XXXXXX
-```
+Enroll once with a password prompt that does not echo:
 
-The command reads the file once, in memory only, never prints, logs,
-or returns its contents, and never copies it to chat, memory, or any
-other file. It encrypts it immediately into the store, then securely
-deletes the source in the same run: overwrite with random bytes,
-unlink, and verify it is gone. It reports only success and deletion
-verification, never the password or its length.
-
-It refuses, leaving the file untouched, if the file is a symlink, lives
-inside a git repository, or has permissions more open than 0600. The
-temp file should live outside any repo, be created with 0600, and be
-deleted by this command, not left sitting around. If seeding fails
-before encryption, the file is left untouched so a failed attempt does
-not destroy the only copy.
-
-### Local-only alternative
-
-The user can build the same binary on their own machine and run
-`setup-auth` there, so the password never reaches Muse at all. In that
-mode Muse only verifies that an encrypted store exists (for example,
-the user reports that the store files are present); routine checks
-that need the password then run on the user's own machine, not by
-Muse, because Muse has no access to a store that stays local. That
-trade-off is intentional: no password reaches Muse, and no remote use
-of that local store is claimed.
-
-Store layout, both files `0600`, directory `0700`, both gitignored and
-excluded from artifacts:
-
-- `credentials.key` — 32 random bytes, the AES-256 key, kept separate
-  from the ciphertext.
-- `credentials.enc` — nonce + AES-256-GCM ciphertext of
-  `{username, password}`.
-
-Plaintext exists only in memory and is never logged. **Do not run
-setup-auth by copying a password from the Secure Vault** — that is
-impossible by design — and do not ask for a password in chat. Setup is
-a separate one-time step after the SDK is built; it is not run as part
-of building or testing this SDK, and no password is enrolled here.
-
-After setup, routine commands use the store without user input:
-
-```
-condo list-open-bills --store-dir ~/.condo-store
+```sh
+condo setup-auth --store-dir /absolute/private/path/condo-store \
+  --username resident@example.test
 ```
 
-If a session expires, the SDK re-logs in automatically from the
-in-memory credentials loaded from the store. If a long-lived or
-refreshable token is later discovered on the portal, support for reusing
-and refreshing it can be added, still without persisting it by default.
-No such token is assumed today.
+For sandbox enrollment, put **only the password** in a private UTF-8 file
+outside any Git repository and the store directory, with mode `0600`.
+A single trailing LF or CRLF is removed; password spaces are preserved.
+Then run:
 
-For one-off use without a store, the CLI also accepts
-`CONDO_USERNAME` / `CONDO_PASSWORD` at runtime only. The CLI never
-writes those values anywhere.
+```sh
+condo setup-auth --store-dir /absolute/private/path/condo-store \
+  --username resident@example.test --from-file /absolute/private/path/password
+```
 
-## Usage
+The command reads the file without printing it, encrypts the credentials,
+verifies the encrypted round trip, overwrites the source, then deletes it.
+If enrollment fails before persistence, the source is retained. If source
+cleanup fails after persistence, the command reports an error; the encrypted
+credentials may already be enrolled. Overwriting and unlinking cannot
+promise physical erasure from SSDs, copy-on-write filesystems, snapshots,
+or backups.
 
-Go library:
+Passwords are never command-line arguments or environment variables. Never
+paste one into chat. Muse browser-vault access is not needed or assumed.
+Use a persistent private sandbox volume for the store if it must survive a
+sandbox restart. Ephemeral disk destruction also destroys these credentials;
+the SDK cannot preserve data beyond the sandbox storage lifecycle.
 
-```go
-package main
+The store contains:
 
-import (
-    "context"
-    "condo"
-)
+| File | Purpose |
+| --- | --- |
+| `credentials.key` | Random 256-bit local encryption key, mode 0600 |
+| `credentials.enc` | Versioned AES-256-GCM encrypted username/password |
+| `session.enc` | AES-256-GCM encrypted cookie jar, including session cookies |
+| `store.lock` | Exclusive process lock, preventing concurrent store updates |
 
-func main() {
-    client, _ := condo.NewClient(condo.Config{BaseURL: condo.DefaultBaseURL})
-    // Supply credentials at runtime, in memory only, e.g. from the
-    // encrypted store: condo.NewCredentialStore(dir).Load()
-    _ = client.Authenticate(context.Background(), condo.Credentials{
-        Username: "user@example.com", Password: "…",
-    })
-    bills, _ := client.ListOpenBills(context.Background(), condo.Pagination{})
-    _ = bills
+The directory must be owned by the current user, mode `0700`, outside Git,
+with no symlinks in its path. Missing directories are created privately.
+Secret files must be owned, private regular files with no hard links or
+symlinks. Credential re-enrollment retains the encryption key and clears
+cached cookies. Writes replace files atomically and fsync before reporting
+success. Encryption authenticates the normalized portal URL and record
+name, preventing reuse under a different portal or as a different record.
+This format does not import the previous Go store: enroll again.
+
+The key and ciphertext are on the same protected filesystem to support
+unattended agents. Encryption protects ciphertext-only disclosure; anyone
+who can read both can decrypt the secrets. Keep both out of artifacts,
+backups accessible to others, and logs. Secret buffers owned by the SDK
+are zeroized on drop where practical; copies made internally by HTTP/TLS
+and serialization libraries are not claimed to be fully erasable.
+
+## Enforced offline mode
+
+`condo --offline` refuses every portal HTTP request, including login. The
+SDK equivalent is `Client::offline(base_url)`. Tool discovery, previews,
+confirmation validation, credential enrollment, and local session deletion
+can run offline. Reads return the structured `offline` error: fresh account
+data necessarily requires HTTP. The complete CLI workflow is tested against
+a loopback mock portal with fake credentials, never the real account.
+
+## Session lifetime
+
+Reads try existing cookies first. Cookie rotation from each response is
+saved encrypted, including cookies without an explicit expiry. These can
+survive CLI process exits. Expired cookies are skipped when reloaded;
+domain, path, Secure, and expiry behavior remain controlled by the cookie
+library and server.
+
+On HTTP 401/403, API status 401/403, or a recognized login HTML form, a read
+loads the password only if needed and performs **one** login attempt,
+validates it against the bills JSON API, and retries the read once. The
+login POST is never retried. API rejection, malformed JSON, missing data,
+and unexpected data shapes are errors rather than empty results.
+
+The SDK cannot extend a server-side expiry, revocation, or password change.
+There is no speculative keepalive, fake device identity, or invented refresh
+endpoint. A mobile refresh-token flow has not been verified for resident
+accounts. Public [mobile login instructions](https://condominios.superlogica.com/hc/pt-br/articles/41295300998039)
+do not document refresh tokens. The official [ERP API tokens](https://apicondominios.superlogica.com/)
+require administrator-created applications; they are not assumed to be
+resident tokens. Persistent cookies plus bounded re-login are the supported
+mechanism here. Additional challenges are returned as authentication errors.
+After rejected credentials, fix enrollment instead of repeatedly scheduling
+login attempts.
+
+To clear local session cookies, including a corrupt cache:
+
+```sh
+condo forget-session --store-dir /absolute/private/path/condo-store
+```
+
+This clears local state; it does not claim to revoke sessions on the server.
+
+## AI agent tools
+
+```sh
+condo tools
+condo unmapped
+printf '%s\n' '{"all":true}' | condo tool list_open_bills \
+  --store-dir /absolute/private/path/condo-store
+printf '%s\n' '{"title":"Leak","subject":"Hallway"}' | condo tool preview_request
+```
+
+`tools` returns 14 tool definitions with descriptions, JSON input/output
+schemas, and safety annotations. The input schemas are generated from the
+same Rust types used for validation. Unknown fields, wrong types, and
+malformed JSON fail before any portal request. A tool receives exactly one
+JSON object on stdin (maximum 1 MiB). Successful output is one JSON value on
+stdout. Failures return nonzero exit status and one JSON error on stderr:
+
+```json
+{"error":{"code":"unauthenticated","message":"unauthenticated: login required or rejected","retryable":false}}
+```
+
+Error messages do not include upstream bodies, URLs containing query
+parameters, passwords, or cookies. `retryable` identifies transport and
+transient HTTP failures; it does not authorize retrying a state-changing
+action. Invalid CLI syntax uses Clap's conventional exit code 2 and help
+text; parsed SDK/tool failures use the JSON envelope above.
+
+| Tool | Result | Portal effects |
+| --- | --- | --- |
+| `list_open_bills`, `list_paid_bills` | Bill arrays | Read |
+| `list_documents` | Document metadata array | Read |
+| `list_notices`, `notice_detail` | Notice array / detail | Read list API only |
+| `list_reservation_availability` | Availability array | Read |
+| `list_requests`, `list_occurrences` | Record arrays | Read |
+| `fetch_document_pdf` | Size, SHA-256, content type | Explicit document fetch |
+| `check_new_bills` | `{new_bills,count}` | Read all open bills |
+| `preview_request`, `preview_reservation` | Fingerprinted preview | None |
+| `create_request`, `pre_reserve_reservation` | Explicit error | Submission unavailable |
+
+Money stays in decimal strings. Missing optional fields are omitted;
+unknown senders and availability are not invented. Server dates use
+month/day/year unless the first component exceeds 12; invalid dates stay
+as reported. Notice HTML bodies are returned as data and must be treated as
+untrusted portal content by agents and renderers.
+
+Read tools have `read_only=true`; they may renew authentication and update
+the local encrypted cache. Authentication and local storage effects are not
+portal business actions. Consequential tools require an unchanged preview
+and explicit `confirm=true`. A changed action or payload invalidates the
+preview. A fingerprint binds data; it does **not** prove human consent—the
+agent host must obtain that consent. Confirmed submission currently returns
+`submission_endpoint_undiscovered` and sends nothing. Preview and submission
+validation can run entirely offline without opening a client.
+
+Visitor registration, visitor release, assembly voting, profile changes,
+payment-method changes, and payments are unavailable. No write endpoint is
+guessed. Consequential tools must never be automatically approved by an
+agent just because the SDK exposes a function.
+
+## CLI shortcuts
+
+```sh
+export CONDO_STORE_DIR=/absolute/private/path/condo-store
+condo list-open-bills --all
+condo list-paid-bills --all --max-pages 50
+condo list-documents
+condo list-notices
+condo notice-detail --id n1
+condo list-reservations
+condo list-requests
+condo list-occurrences
+condo fetch-document-pdf --id doc1 --output ./report.pdf
+condo check-new-bills --state ./open-bills.jsonl --update-state
+```
+
+`CONDO_BASE_URL` or `--base-url` selects the portal; otherwise the default
+is Dinâmica Condomínios SC. The base URL contains no credentials. HTTPS is
+required, with a loopback HTTP exception for tests. All requests, redirects,
+and login form actions must stay on the configured origin. TLS certificate
+validation stays enabled. Relative PDF and state output paths work; their
+parent directory must already exist. Outputs are written atomically with
+mode `0600`. `check-new-bills` fails on unreadable or malformed previous state
+and only updates it after a complete successful fetch. New bills are deduplicated
+by ID, or a collision-safe tuple of due date, label, and amount. A scheduler
+can suppress notifications when `count` is zero.
+
+Bills default to one page. `--all` reads until an empty page (default cap
+20; configurable 1–100). Repeated records or reaching the cap fail rather
+than silently returning an incomplete set. Documents read all pages with a
+cap of 100. Other lists retain the known endpoint behavior; undocumented
+pagination is not assumed. GET requests have at most three attempts for
+transport failures and HTTP 429/502/503/504, with bounded backoff.
+`Retry-After` seconds up to five are honored; longer delays are returned to
+the caller. Requests have a 30-second timeout, a 10-second connect timeout,
+a five-redirect cap, and a 12 MiB API response limit (64 MiB for PDFs) with explicit overflow errors.
+
+## Rust library
+
+The client is synchronous and requires mutable access to serialize session
+renewal. In an async agent host, run it on a blocking worker. All portal
+results have exported Rust types; agent tools additionally expose JSON.
+
+```no_run
+use condo::{Client, Pagination, Store};
+
+fn main() -> condo::Result<()> {
+    let store = Store::open("/absolute/private/path/condo-store")?;
+    let mut client = Client::from_store(condo::DEFAULT_BASE_URL, store)?;
+    let bills = client.list_open_bills(Pagination { all: true, max_pages: None })?;
+    println!("{} open bills", bills.len());
+    Ok(())
 }
 ```
 
-CLI (JSON on stdout, errors on stderr):
-
-```
-condo tools
-condo list-open-bills --store-dir ~/.condo-store
-condo list-paid-bills --store-dir ~/.condo-store --all
-condo list-documents --store-dir ~/.condo-store
-condo list-notices --store-dir ~/.condo-store
-condo notice-detail --id <id> --store-dir ~/.condo-store
-condo list-reservations --store-dir ~/.condo-store
-condo list-requests --store-dir ~/.condo-store
-condo list-occurrences --store-dir ~/.condo-store
-condo fetch-document-pdf --id <id> --output doc.pdf --store-dir ~/.condo-store
-condo preview-request --title "…" --subject "…"
-condo create-request --title "…" --subject "…" --confirm --store-dir ~/.condo-store
-condo preview-reservation --area "SALÃO DE FESTAS" --date 2026-11-02 --period "full day"
-condo pre-reserve --area "SALÃO DE FESTAS" --date 2026-11-02 --period "full day" --confirm --store-dir ~/.condo-store
-```
-
-## Routine automation: check-new-bills
-
-```
-condo check-new-bills --store-dir ~/.condo-store \
-  --state ~/condo-state/open-bills.jsonl --update-state
-```
-
-Output is JSON, for example:
-
-```json
-{"checked_at": "2026-11-01T00:00:00Z", "new_bills": [], "count": 0}
-```
-
-Each new bill includes period, due date, total (`amount_brl`), and
-status. When `new_bills` is empty, a cron wrapper should stay silent.
-Daily cron example:
-
-```
-# Daily, silent unless a new bill arrives; report in the condo side chat only then.
-0 9 * * * condo check-new-bills --store-dir ~/.condo-store --state ~/condo-state/open-bills.jsonl --update-state > /tmp/condo-check.json 2>/tmp/condo-check.err || true
-# Notify only if the JSON count is greater than 0.
-```
-
-No user website visit and no user input per check, after the one-time
-setup-auth step. `--update-state` writes the current open-bill list as
-JSONL (0600) so the next run is silent unless something changes.
-
-## Tool catalog
-
-| Tool | Read-only | Changes state | Notes |
-|---|---|---|---|
-| list_open_bills | yes | no | Empty list when none open |
-| list_paid_bills | yes | no | `--all` follows More-items pagination |
-| list_documents | yes | no | Metadata only, no content |
-| list_notices | yes | no | Sender unknown unless the row states it |
-| notice_detail | yes | no | Opening may change read state |
-| list_reservation_availability | yes | no | Grid slots |
-| list_requests | yes | no | Empty list when none |
-| list_occurrences | yes | no | Empty list when none |
-| fetch_document_pdf | yes | no | Metadata (size, SHA-256) in JSON; bytes via library/CLI file output only |
-| check_new_bills | yes | no | Only new bills vs previous JSONL state |
-| preview_request | yes | no | Always before create_request |
-| create_request | no | yes | Preview + confirm; see Limitations |
-| preview_reservation | yes | no | Always before pre_reserve_reservation |
-| pre_reserve_reservation | no | yes | Preview + confirm; see Limitations |
-
-Explicitly **not available** (not in the resident menu, not guessed):
-`register_visitor`, `release_visitor`, `assembly_vote`,
-`update_profile`, `change_payment_method`, `pay_bill`.
-
-Each tool in code carries a name, description, JSON input/output
-schema, and safety annotations (`read_only`, `destructive`,
-`idempotent`, `moves_money`, `changes_state`).
-
-## Safety tiers
-
-- **Read:** no confirmation needed.
-- **Consequential** (request, reservation, and any future pay/vote/
-  change): preview first, then explicit `confirm=true` matching that
-  preview. Without confirmation the call returns the preview and a
-  `confirmation_required` error and sends nothing.
-- **Destructive:** preview + `confirm=true` + the caller re-stating
-  the exact target (see `ValidateDestructive`).
-
-Having a function in the library does not mean an agent should run it
-on its own. Payments, votes, and payment-method changes would still
-require explicit user approval each time.
-
-## Limitations — what is proven vs undiscovered
-
-Proven by live, read-only execution on 2026-11-01 (no reservation,
-request, or payment was made):
-
-- Sign-in: login page form (email + senha, hidden fields) ->
-  `publico/verificarcondomino` API (returns -1 for a registered
-  resident) -> POST `publico/auth` with AJAX headers -> verified by
-  fetching `/cobranca/index`. No code or CAPTCHA was presented.
-  A direct GET to the auth URL returns an empty 200 and no session;
-  POST is required. Path joining must preserve the client base path;
-  joining to the host root returns `Aplicação inválida` 400.
-- Menu sections present: Boletos, Documentos, Comunicados, Reservas,
-  Solicitações, Ocorrências.
-- JSON API reads, all validated live: bills
-  (`cobranca/index`, status parameter required, classified by
-  `dt_liquidacao_recb`), documents
-  (`impressoes/index?doTipo=documento&apenasOutrosDocumentos=1`),
-  notices (`comunicados/index?doTipo=documento`), reservations
-  (`reservas/index`, sub-areas with a datas map), requests
-  (`tickets/index`, empty), occurrences (`ocorrencias/index`, empty).
-  Notice detail is from the list API, so it does not open a notice
-  page or change read state. Document PDF:
-  `/documentos/download?id={id}` (validated live, metadata only by
-  default).
-
-Undiscovered / unverified — the SDK marks these explicitly and does
-not guess them:
-- **No request submission endpoint.** The `/tickets` "New request"
-  modal is `javascript:void(0)`; a confirmed `CreateRequest` returns
-  `submission_endpoint_undiscovered` and sends nothing.
-- **No reservation submission endpoint.** The `/reservas`
-  pre-reserve dialog is `javascript:void(0)`; a confirmed
-  `PreReserveReservation` returns `submission_endpoint_undiscovered`
-  and makes no reservation.
-- **No payment endpoint.** Open charges were 0 in the mapping and paid
-  rows are JavaScript-driven, so whether a bill row opens an HTML
-  second-copy detail or a PDF, and any payment endpoint, are unresolved.
-- **Notice sender split unverified.** Individual notices were not
-  opened (to avoid changing read state), so administrator vs síndico
-  sender is unknown.
-- **Live reservation / request / payment not executed.** The SDK has
-  not made a live reservation, request, or payment. Do not claim
-  those work until their endpoints are discovered with user approval.
-
-## Development
-
-Requires Go 1.27 (toolchain at `~/workspace/tools/go/bin/go` in this
-workspace). One external dependency, `golang.org/x/net/html`, is used
-only for HTML parsing; everything else is standard library.
-
-```sh
-export PATH=$HOME/workspace/tools/go/bin:$PATH
-gofmt -l .
-go vet ./...
-go test ./...
-go build -o condo ./cmd/condo
-```
-
-Tests use a local mock HTTP server with fake API JSON fixtures and
-never hit the live portal. Live validation is a separate, explicit
-step, as above.
+`Client::with_credentials` supports in-memory credentials for embedding.
+`Client::new` can use public endpoints without credentials. `from_store`
+loads encrypted cookies immediately, and loads credentials only on session
+rejection. Keep separate stores for different portals/accounts. The process
+lock is held until the client/store drops; a concurrent command gets a
+structured busy error rather than racing cookie rotation.

@@ -1,0 +1,39 @@
+[package]
+name = "condo-library"
+version = "0.2.0"
+edition = "2024"
+description = "Direct HTTP resident portal SDK with encrypted persistent sessions"
+rust-version = "1.88"
+include = ["src/**", "Cargo.toml", "Cargo.lock", "README.md", "AUDIT.md", "AGENTS.md"]
+
+[lib]
+name = "condo"
+
+[[bin]]
+name = "condo"
+path = "src/main.rs"
+
+[dependencies]
+aes-gcm = "0.10"
+clap = { version = "4", features = ["derive", "env"] }
+cookie_store = "0.22"
+fs2 = "0.4"
+encoding_rs = "0.8"
+libc = "0.2"
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "cookies", "rustls-tls", "json"] }
+reqwest_cookie_store = "0.9"
+rpassword = "7"
+scraper = { version = "0.29", default-features = false }
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["arbitrary_precision"] }
+sha2 = "0.10"
+tempfile = "3"
+thiserror = "2"
+url = "2"
+zeroize = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+jsonschema = { version = "0.60", default-features = false, features = ["arbitrary-precision"] }
+tiny_http = "0.12"

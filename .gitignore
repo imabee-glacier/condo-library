@@ -1,0 +1,13 @@
+# Credential store: never commit, never include in an artifact.
+credentials.key
+credentials.enc
+*.key
+*.enc
+# Temp password seeding files: never commit.
+condo-pass*
+*.tmp-pass
+# Local state and built binaries.
+/condo
+/cmd/condo/condo
+*.jsonl
+!testdata/*.jsonl

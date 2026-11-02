@@ -613,14 +613,15 @@ jobs:
             done < <(git log -z --format='%h%x1f%s%x1f%b' "${prev:+$prev..}$sha" -- "${pathspecs[@]}")
 
             if [ -z "$tag" ]; then
-              if [ "$level" -eq 0 ]; then
-                echo "$name: no releasable commits since ${prev:-the beginning}"
-                continue
-              fi
-              if [ -n "$prev" ]; then
-                base=${prev#"${name}-v"}
-              else
+              if [ -z "$prev" ]; then
+                # No tag yet: the first run releases the version in the component's Cargo.toml as is.
                 base=$(jq -r --arg c "$crate0" '.packages[] | select(.name == $c) | .version' <<<"$meta")
+                level=0
+              elif [ "$level" -eq 0 ]; then
+                echo "$name: no releasable commits since $prev"
+                continue
+              else
+                base=${prev#"${name}-v"}
               fi
               [[ $base =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::$name: base version '$base' is not X.Y.Z"; exit 1; }
               IFS=. read -r maj min pat <<<"$base"
@@ -649,6 +650,7 @@ jobs:
             section "Features" "${n_feat[@]}"
             section "Fixes" "${n_fix[@]}"
             section "Performance" "${n_perf[@]}"
+            [ -n "$notes" ] || notes="Initial release."
 
             echo "$name: $tag (previous: ${prev:-none})"
             releases=$(jq -c --argjson comp "$comp" --arg version "$version" --arg tag "$tag" --arg prev "$prev" --arg notes "$notes" '

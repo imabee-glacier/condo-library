@@ -11,18 +11,15 @@ the repository. See [AUDIT.md](AUDIT.md) for findings and verification limits.
 
 ## Install
 
-Prebuilt `x86_64-unknown-linux-gnu` binaries are published on the
-[releases page](https://github.com/imabee-glacier/condo-library/releases).
-With the [GitHub CLI](https://cli.github.com) signed in, one line installs
-the latest release into `~/.local/bin`:
-
 ```sh
-mkdir -p ~/.local/bin && gh release download --repo imabee-glacier/condo-library --pattern '*-x86_64-unknown-linux-gnu.tar.gz' --output - | tar -xz -C ~/.local/bin ./condo
+curl -fsSL https://github.com/imabee-glacier/condo-library/releases/latest/download/install.sh | bash
 ```
 
-The repository is private, so a plain `curl` cannot fetch the assets; `gh`
-supplies the authentication. Each release also carries a `.sha256` file for
-the tarball. Check the install with `condo --version`.
+Installs the latest `x86_64-unknown-linux-gnu` release to `~/.local/bin`
+after verifying its SHA-256 checksum. Set `CONDO_INSTALL_DIR` to change the
+directory or `CONDO_VERSION` to pin a version. The repository must be
+public for this URL to resolve without authentication. Check the install
+with `condo --version`.
 
 ## Build and check
 

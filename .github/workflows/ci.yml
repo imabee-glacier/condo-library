@@ -31,7 +31,7 @@ env:
       "COMPONENTS": [
         {
           "name": "condo-library",
-          "paths": ["src/**", "tests/**", "build.rs", "Cargo.toml"],
+          "paths": ["src/**", "tests/**", "build.rs", "Cargo.toml", "scripts/install.sh"],
           "crates": ["condo-library"],
           "targets": ["x86_64-unknown-linux-gnu"],
           "versioned": true,
@@ -821,6 +821,8 @@ jobs:
             jq -r .notes <<<"$rel" > "$notes"
             [ -s "$notes" ] || echo "Release $tag" > "$notes"
             files=("$dist/$name-$version-"*.tar.gz "$dist/$name-$version-"*.sha256)
+            # The curl installer ships with every release so releases/latest/download/install.sh always resolves.
+            files+=("$GITHUB_WORKSPACE/scripts/install.sh")
             if gh release view "$tag" > /dev/null 2>&1; then
               if [ "${#files[@]}" -gt 0 ]; then gh release upload "$tag" "${files[@]}" --clobber; fi
             else

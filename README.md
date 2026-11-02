@@ -91,6 +91,9 @@ backups accessible to others, and logs. Secret buffers owned by the SDK
 are zeroized on drop where practical; copies made internally by HTTP/TLS
 and serialization libraries are not claimed to be fully erasable.
 
+Several commands may run at once, for example a cron job and an agent call:
+the CLI waits up to 60 seconds for the store lock instead of failing.
+
 ## Enforced offline mode
 
 `condo --offline` refuses every portal HTTP request, including login. The

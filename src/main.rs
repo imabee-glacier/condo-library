@@ -108,12 +108,26 @@ fn stdin_json() -> Result<Value> {
     }
     serde_json::from_slice(&bytes).map_err(|_| Error::Validation("stdin must contain valid JSON"))
 }
+/// Another process may hold the store lock (a cron run, a second agent call). Wait for it, bounded.
+fn open_store(dir: &PathBuf) -> Result<Store> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        match Store::open(dir) {
+            Err(Error::Validation(m))
+                if m.contains("store is busy") && std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+            other => return other,
+        }
+    }
+}
 fn client(a: &Args) -> Result<Client> {
     if a.offline {
         return Client::offline(&a.base_url);
     }
     if let Some(dir) = &a.store_dir {
-        Client::from_store(&a.base_url, Store::open(dir)?)
+        Client::from_store(&a.base_url, open_store(dir)?)
     } else {
         Client::new(&a.base_url)
     }
@@ -122,7 +136,7 @@ fn run(a: &Args) -> Result<Value> {
     match &a.command {
         Command::Tools => return Ok(json!(tools::tools())),
         Command::ForgetSession => {
-            let store = Store::open(
+            let store = open_store(
                 a.store_dir
                     .as_ref()
                     .ok_or(Error::Validation("--store-dir is required"))?,
@@ -136,7 +150,7 @@ fn run(a: &Args) -> Result<Value> {
             from_file,
         } => {
             let base = Client::normalize_base(&a.base_url)?;
-            let store = Store::open(
+            let store = open_store(
                 a.store_dir
                     .as_ref()
                     .ok_or(Error::Validation("--store-dir is required"))?,

@@ -670,3 +670,27 @@ fn pdf_download_accepts_large_documents_without_relaxing_api_limit() {
     assert!(matches!(client.list_notices(), Err(Error::TooLarge)));
     worker.join().unwrap();
 }
+
+#[test]
+fn cli_waits_for_a_busy_store_instead_of_failing() {
+    use std::process::{Command, Stdio};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("store");
+    let held = store(&path, "https://portal.test/");
+    let child = Command::new(env!("CARGO_BIN_EXE_condo"))
+        .arg("--store-dir")
+        .arg(&path)
+        .arg("forget-session")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    thread::sleep(std::time::Duration::from_millis(800));
+    drop(held);
+    let out = child.wait_with_output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}

@@ -385,7 +385,7 @@ impl Error {
             Self::Offline => "offline",
             Self::Validation(_) => "validation",
             Self::Unauthenticated => "unauthenticated",
-            Self::Transport => "transport",
+            Self::Transport(_) => "transport",
             Self::Http(_) => "http",
             Self::Api => "api",
             Self::Parse => "parse",
@@ -398,6 +398,6 @@ impl Error {
         }
     }
     pub fn as_json(&self) -> Value {
-        json!({"code":self.code(),"message":self.to_string(),"retryable":matches!(self,Self::Transport|Self::Http(429|502|503|504))})
+        json!({"code":self.code(),"message":self.to_string(),"retryable":matches!(self,Self::Transport(_)|Self::Http(429|502|503|504))})
     }
 }

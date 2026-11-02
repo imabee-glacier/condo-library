@@ -16,8 +16,8 @@ pub enum Error {
     Validation(&'static str),
     #[error("unauthenticated: login required or rejected")]
     Unauthenticated,
-    #[error("HTTP request failed")]
-    Transport,
+    #[error("HTTP request failed ({0})")]
+    Transport(&'static str),
     #[error("portal HTTP status {0}")]
     Http(u16),
     #[error("portal API rejected the request")]

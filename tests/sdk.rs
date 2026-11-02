@@ -694,3 +694,116 @@ fn cli_waits_for_a_busy_store_instead_of_failing() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+/// A server that promises keep-alive but answers one request per connection, and hangs up on any
+/// request that arrives on a reused connection, as a server or proxy dropping idle connections does.
+fn closing_server() -> (String, Arc<AtomicUsize>) {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let logins = Arc::new(AtomicUsize::new(0));
+    let count = logins.clone();
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let count = count.clone();
+            thread::spawn(move || {
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 4096];
+                let head_end = loop {
+                    let n = stream.read(&mut chunk).unwrap_or(0);
+                    if n == 0 {
+                        return;
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                    if let Some(p) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                        break p + 4;
+                    }
+                };
+                let head = String::from_utf8_lossy(&buf[..head_end]).to_lowercase();
+                let want: usize = head
+                    .lines()
+                    .find_map(|l| l.strip_prefix("content-length:"))
+                    .and_then(|v| v.trim().parse().ok())
+                    .unwrap_or(0);
+                while buf.len() < head_end + want {
+                    let n = stream.read(&mut chunk).unwrap_or(0);
+                    if n == 0 {
+                        return;
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                }
+                let first = head.lines().next().unwrap_or("").to_owned();
+                let (kind, body) = if first.contains("publico/verificarcondomino") {
+                    (
+                        "application/json",
+                        r#"{"status":200,"data":"-1"}"#.to_owned(),
+                    )
+                } else if first.starts_with("post ") && first.contains("publico/auth") {
+                    count.fetch_add(1, Ordering::SeqCst);
+                    (
+                        "application/json",
+                        r#"{"status":"202","data":{}}"#.to_owned(),
+                    )
+                } else if first.contains("cobranca") {
+                    if !head.contains("cookie: sid=valid") {
+                        (
+                            "application/json",
+                            r#"{"status":"401","data":[]}"#.to_owned(),
+                        )
+                    } else if first.contains("pagina=2") {
+                        (
+                            "application/json",
+                            r#"{"status":"200","data":[]}"#.to_owned(),
+                        )
+                    } else {
+                        ("application/json", r#"{"status":"200","data":[{"id_recebimento_recb":"1","vl_total_recb":"1.00"}]}"#.to_owned())
+                    }
+                } else {
+                    (
+                        "text/html",
+                        "<form action='/areadocondomino/atual/publico/auth'><input name='email'><input type='password' name='senha'></form>".to_owned(),
+                    )
+                };
+                let cookie = if first.starts_with("post ") {
+                    "Set-Cookie: sid=valid; Path=/\r\n"
+                } else {
+                    ""
+                };
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\n{cookie}Content-Length: {}\r\nConnection: keep-alive\r\n\r\n{body}",
+                    body.len()
+                );
+                // The race that bites pooled clients: the next request arrives on this connection just
+                // as the server drops it. Hang up on it without answering.
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(400)));
+                let _ = stream.read(&mut chunk);
+            });
+        }
+    });
+    (format!("http://{addr}/clients/areadocondomino/"), logins)
+}
+#[test]
+fn login_flow_survives_a_server_that_closes_idle_connections() {
+    let (base, logins) = closing_server();
+    for _ in 0..5 {
+        let mut c = Client::with_credentials(&base, creds()).unwrap();
+        // Page GET, check GET, password POST, proof GET, read: five requests on a server that
+        // hangs up on every reused connection. None may fail, and each login is sent once.
+        assert_eq!(c.list_open_bills(Pagination::default()).unwrap().len(), 1);
+    }
+    assert_eq!(logins.load(Ordering::SeqCst), 5);
+}
+#[test]
+fn transport_errors_say_why_without_leaking_anything() {
+    // Nothing listens on port 1: a connect failure, which is categorized and retryable.
+    let mut c = Client::with_credentials("http://127.0.0.1:1/", creds()).unwrap();
+    let e = c.list_open_bills(Pagination::default()).unwrap_err();
+    assert!(matches!(e, Error::Transport("connect")), "{e}");
+    assert_eq!(e.as_json()["retryable"], true);
+    let text = e.to_string();
+    assert!(
+        !text.contains("127.0.0.1") && !text.contains("fake"),
+        "{text}"
+    );
+}

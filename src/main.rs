@@ -11,7 +11,7 @@ use zeroize::Zeroizing;
 #[derive(Parser)]
 #[command(
     name = "condo",
-    version,
+    version = env!("CONDO_VERSION"),
     about = "Direct HTTP resident portal SDK for AI agents"
 )]
 struct Args {

@@ -4,7 +4,7 @@ version = "0.2.0"
 edition = "2024"
 description = "Direct HTTP resident portal SDK with encrypted persistent sessions"
 rust-version = "1.88"
-include = ["src/**", "Cargo.toml", "Cargo.lock", "README.md", "AUDIT.md", "AGENTS.md"]
+include = ["src/**", "build.rs", "Cargo.toml", "Cargo.lock", "README.md", "AUDIT.md", "AGENTS.md"]
 
 [lib]
 name = "condo"
@@ -33,7 +33,12 @@ tempfile = "3"
 thiserror = "2"
 url = "2"
 zeroize = { version = "1", features = ["derive"] }
+workspace-hack = { version = "0.1", path = "workspace-hack" }
 
 [dev-dependencies]
 jsonschema = { version = "0.60", default-features = false, features = ["arbitrary-precision"] }
 tiny_http = "0.12"
+
+[workspace]
+resolver = "3"
+members = [".","workspace-hack"]

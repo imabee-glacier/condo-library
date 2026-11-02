@@ -311,7 +311,17 @@ fn store_reenrollment_and_process_lock() {
     s.enroll("https://portal.test/", &creds()).unwrap();
     assert_eq!(key, fs::read(dir.path().join("credentials.key")).unwrap());
     drop(s);
-    assert!(Store::open(dir.path()).is_ok());
+    // Tests run in parallel threads, and a concurrently spawned CLI process holds an inherited
+    // copy of the lock descriptor until it execs, so the release can lag the drop briefly.
+    let mut reopened = Store::open(dir.path());
+    for _ in 0..200 {
+        if reopened.is_ok() {
+            break;
+        }
+        thread::sleep(std::time::Duration::from_millis(10));
+        reopened = Store::open(dir.path());
+    }
+    assert!(reopened.is_ok());
 }
 #[test]
 fn store_rejects_unsafe_files_and_missing_key() {

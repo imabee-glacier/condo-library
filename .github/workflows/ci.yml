@@ -33,7 +33,7 @@ env:
           "name": "condo-library",
           "paths": ["src/**", "tests/**", "build.rs", "Cargo.toml"],
           "crates": ["condo-library"],
-          "targets": ["x86_64-unknown-linux-gnu"],
+          "targets": ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"],
           "versioned": true,
           "publish": false
         }
@@ -47,6 +47,15 @@ env:
           "tier": 1,
           "tested": true,
           "paths": []
+        },
+        {
+          "name": "linux-arm",
+          "triple": "aarch64-unknown-linux-gnu",
+          "runner": "ubuntu-latest",
+          "method": "zigbuild",
+          "tier": 2,
+          "tested": false,
+          "paths": ["src/**"]
         }
       ]
     }

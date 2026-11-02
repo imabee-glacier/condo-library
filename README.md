@@ -9,6 +9,21 @@ extension, or browser fallback is used anywhere in the SDK.
 This is a fresh implementation. The previous Go sources are no longer in
 the repository. See [AUDIT.md](AUDIT.md) for findings and verification limits.
 
+## Install
+
+Prebuilt `x86_64-unknown-linux-gnu` binaries are published on the
+[releases page](https://github.com/imabee-glacier/condo-library/releases).
+With the [GitHub CLI](https://cli.github.com) signed in, one line installs
+the latest release into `~/.local/bin`:
+
+```sh
+mkdir -p ~/.local/bin && gh release download --repo imabee-glacier/condo-library --pattern '*-x86_64-unknown-linux-gnu.tar.gz' --output - | tar -xz -C ~/.local/bin ./condo
+```
+
+The repository is private, so a plain `curl` cannot fetch the assets; `gh`
+supplies the authentication. Each release also carries a `.sha256` file for
+the tarball. Check the install with `condo --version`.
+
 ## Build and check
 
 Use current stable Rust on Linux or another Unix platform. Dependencies

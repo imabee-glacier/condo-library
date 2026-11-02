@@ -558,7 +558,7 @@ jobs:
         run: |
           # feat = minor; fix, perf = patch; "!" or a BREAKING CHANGE footer = major (any type);
           # docs, chore, ci, test, style, refactor, build, revert = no release on their own.
-          # Commits are read per component, limited to its paths plus shared (versioned=false) paths.
+          # Commits are read per component, limited to its paths plus the shared (versioned=false) paths it depends on.
           set -euo pipefail
           sha=$GITHUB_SHA
           meta=$(cargo metadata --locked --no-deps --format-version 1)
@@ -570,7 +570,18 @@ jobs:
             tag_re="^${name}-v[0-9]+\.[0-9]+\.[0-9]+\$"
             mapfile -t tags < <(git tag --list "${name}-v*" --merged "$sha" --sort=-v:refname | grep -E "$tag_re" || true)
             at_head=$(git tag --points-at "$sha" --list "${name}-v*" | grep -E "$tag_re" | sort -V | tail -n 1 || true)
-            mapfile -t pathspecs < <(jq -r --arg n "$name" '[.COMPONENTS[] | select(.name == $n or (.versioned | not)) | .paths[]] | unique | .[] | ":(glob)" + .' <<<"$CONFIG")
+            # Own paths plus the paths of shared (versioned=false) components this component reaches
+            # through workspace dependencies, so unrelated shared changes do not release it.
+            mapfile -t pathspecs < <(jq -r --arg n "$name" --argjson meta "$meta" '
+              . as $cfg
+              | (first($cfg.COMPONENTS[] | select(.name == $n))) as $me
+              | def expand($set):
+                  ([$meta.packages[] | select(.name as $p | $set | index($p)) | .dependencies[].name] + $set | unique) as $next
+                  | if $next == $set then $set else expand($next) end;
+                expand($me.crates | unique) as $reach
+              | [$cfg.COMPONENTS[]
+                 | select(.name == $n or ((.versioned | not) and any(.crates[]; . as $c | $reach | index($c))))]
+              | map(.paths[]) | unique | .[] | ":(glob)" + .' <<<"$CONFIG")
 
             if [ -n "$at_head" ]; then
               # Re-run: the tag already exists at this commit, so reuse it and continue.
@@ -705,7 +716,7 @@ jobs:
         if: matrix.method == 'zigbuild'
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
-          version: latest
+          version: 0.17.0
       # Hits because: <triple>-release is written only by this leg on main (one writer per key,
       # save-if main) and restored by the next release build; CI_VERSION_* changes only rebuild the crate.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3

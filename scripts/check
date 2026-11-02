@@ -6,7 +6,7 @@ CONFIG='{
   "BASE_REF": "origin/main",
   "FEATURES": "default",
   "COMPONENTS": [{"name":"condo-library","crates":["condo-library"],"targets":["x86_64-unknown-linux-gnu"]}],
-  "TARGETS": [{"triple":"x86_64-unknown-linux-gnu","method":"cargo"}]
+  "TARGETS": [{"triple":"x86_64-unknown-linux-gnu","method":"native"}]
 }'
 
 MODE=fast FULL=0 FAIL_FAST=1 FORCE=0 BASE_REF='' BUILD_TARGET=''
@@ -191,7 +191,7 @@ jq -e --slurpfile members "$TMP/members.json" '
  ($features == "default" or $features == "all") and
  ([.COMPONENTS[].name]|length == (unique|length)) and
  ([$targets[].triple]|length == (unique|length)) and
- all($targets[]; (.triple|test("^[A-Za-z0-9][A-Za-z0-9_-]+$")) and (.method == "cargo" or .method == "zigbuild")) and
+ all($targets[]; (.triple|test("^[A-Za-z0-9][A-Za-z0-9_-]+$")) and (.method == "native" or .method == "zigbuild")) and
  all(.COMPONENTS[]; (.name|test("^[A-Za-z0-9_-]+$")) and (.crates|length>0) and (.targets|length>0) and
    all(.crates[]; . as $c | any($members[0][]; .name==$c)) and
    all(.targets[]; . as $t | any($targets[]; .triple==$t)))' <<<"$CONFIG" >/dev/null || { printf 'Invalid CONFIG or unknown package/target\n'; exit 2; }
